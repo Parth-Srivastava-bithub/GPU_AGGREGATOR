@@ -97,23 +97,6 @@ def runpod_scrape_runpod():
                 "availability": availability.group(1).lower() if availability else None,
             })
 
-        with open("extracted_runpod_gpu_catalog.csv", "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(
-                f,
-                fieldnames=[
-                    "gpu_name",
-                    "hourly_price",
-                    "vram_gb",
-                    "max",
-                    "ram_gb",
-                    "vcpu",
-                    "availability"
-                ]
-            )
-            writer.writeheader()
-            writer.writerows(rows)
-
-        print(f"Saved {len(rows)} GPUs to extracted_runpod_gpu_catalog.csv")
         return rows
 
 def normalize_gpu_name(name: str) -> str:

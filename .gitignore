@@ -45,3 +45,6 @@ htmlcov/
 
 chrome_cdp_profile/
 runpod_gpu_catalog.csv
+
+.agents/
+.claude/

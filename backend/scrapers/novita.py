@@ -2,6 +2,8 @@ from dotenv import load_dotenv
 import requests
 import os
 import re
+from scrapers.novita_playwright import scrape_novita_datacenters
+from pymongo import MongoClient
 
 load_dotenv()
 
@@ -11,6 +13,8 @@ class NovitaProvider:
     def __init__(self):
         self.api_key = os.getenv("NOVITA_API_KEY")
         self.url = "https://api.novita.ai"
+        self.client = MongoClient("mongodb://localhost:27017/")
+        self.db = self.client["gpu_aggregator"]
 
     def extract_vram(self, name):
         match = re.search(r'(\d+)GB', name)
@@ -111,3 +115,70 @@ class NovitaProvider:
             reverse=True
         )
         return result
+
+class NovitaVolume(NovitaProvider):
+
+    def __init__(self):
+        super().__init__()
+
+    def sync_novita_datacenters(self):
+
+        collection = self.db["datacenters"]
+
+        scraper_data = scrape_novita_datacenters()
+
+        for dc in scraper_data:
+
+            match = re.match(r"(.+?)\s+\((.+)\)", dc["cluster"])
+
+            if match:
+                datacenter_id = match.group(1)
+                location = match.group(2)
+            else:
+                datacenter_id = dc["cluster"]
+                location = ""
+
+            gpu_availability = []
+
+            for gpu in dc["available"]:
+                gpu_availability.append({
+                    "gpu_name": gpu,
+                    "available": True
+                })
+
+            for gpu in dc["unavailable"]:
+                gpu_availability.append({
+                    "gpu_name": gpu,
+                    "available": False
+                })
+
+            collection.update_one(
+                {
+                    "_id": f"novita>{datacenter_id}"
+                },
+                {
+                    "$set": {
+                        "provider": "Novita",
+                        "datacenter_id": datacenter_id,
+                        "name": dc["cluster"],
+                        "location": location,
+                        "gpuAvailability": gpu_availability
+                    }
+                },
+                upsert=True
+            )
+
+        return scraper_data
+    
+    
+class CompoundNovita:
+
+    def __init__(self):
+        self.provider = NovitaProvider()
+        self.volume = NovitaVolume()
+        
+        
+# nv = CompoundNovita()
+
+# nv.provider.get_gpus()
+# nv.volume.sync_novita_datacenters()
