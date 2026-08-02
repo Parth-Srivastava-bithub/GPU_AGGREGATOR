@@ -272,28 +272,3 @@ def runpod_get_gpus():
 
         except Exception as e:
             return {"error": str(e)}
-
-# def main():
-
-#     playwright_data = scrape_runpod()
-
-#     # graphql_data = Runpod().get_gpus()
-#     graphql_data = get_gpus()     # jo bhi tera function hai
-
-#     merged = merge(playwright_data, graphql_data)
-#     with open(
-#         "runpod_merged.csv",
-#         "w",
-#         newline="",
-#         encoding="utf-8"
-#     ) as f:
-
-#         writer = csv.DictWriter(
-#             f,
-#             fieldnames=merged[0].keys()
-#         )
-
-#         writer.writeheader()
-#         writer.writerows(merged)
-
-#     print(f"Saved {len(merged)} GPUs to runpod_merged.csv")
