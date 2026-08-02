@@ -1,6 +1,5 @@
 from apscheduler.schedulers.blocking import BlockingScheduler
-from database.db import get_connection
-import sqlite3
+from database.db import get_connection, create_database
 
 from scrapers.runpod_playwright import (
     runpod_scrape_runpod,
@@ -9,7 +8,13 @@ from scrapers.runpod_playwright import (
 )
 
 from scrapers.novita import NovitaProvider
+from scrapers.runpod import CompoundRunpod
+
 novita = NovitaProvider()
+compound_runpod = CompoundRunpod()
+
+def make_gpu_id(provider, gpu_id):
+    return f"{provider.lower()}>{gpu_id}"
 
 def upsert_many(merged):
 
@@ -73,7 +78,7 @@ def upsert_many(merged):
 
         values.append((
             gpu["provider"],
-            gpu["gpu_id"],
+            make_gpu_id(gpu["provider"], gpu["gpu_id"]),
             gpu["gpu_name"],
             gpu["manufacturer"],
 
@@ -133,7 +138,7 @@ def update_live_fields(graphql_data):
             gpu["availability"],
             int(gpu["deployable"]),
 
-            gpu["gpu_id"],
+            make_gpu_id(gpu["provider"], gpu["gpu_id"]),
         ))
 
     cursor.executemany(query, values)
@@ -143,31 +148,45 @@ def update_live_fields(graphql_data):
 
     print(f"Updated {len(values)} GPUs.")
 
+def update_gpu_catalog():
+     # ---------- RunPod ----------
+        print("RunPod Scraping...")
+        playwright_data = runpod_scrape_runpod()
+    
+        print("RunPod GraphQL...")
+        graphql_data = runpod_get_gpus()
+    
+        print("RunPod Merge...")
+        merged = runpod_merge(playwright_data, graphql_data)
+    
+        print("RunPod Upsert...")
+        upsert_many(merged)
+    
+        # ---------- Novita ----------
+        print("Novita Fetch...")
+    
+        novita_data = novita.get_gpus()
+    
+        print("Novita Upsert...")
+    
+        upsert_many(novita_data)
+
+def sync_datacenters():
+    print("Syncing runpod datacenteres...")
+    compound_runpod.volume.sync_runpod_datacenters()
 
 def full_sync():
+    
+   
+    print("Syncing GPU Catalog...")
+    update_gpu_catalog()
+
+    print("Syncing Datacenters...")
+    sync_datacenters()
+
     print("Running full sync...")
 
-    # ---------- RunPod ----------
-    print("RunPod Scraping...")
-    playwright_data = runpod_scrape_runpod()
-
-    print("RunPod GraphQL...")
-    graphql_data = runpod_get_gpus()
-
-    print("RunPod Merge...")
-    merged = runpod_merge(playwright_data, graphql_data)
-
-    print("RunPod Upsert...")
-    upsert_many(merged)
-
-    # ---------- Novita ----------
-    print("Novita Fetch...")
-
-    novita_data = novita.get_gpus()
-
-    print("Novita Upsert...")
-
-    upsert_many(novita_data)
+   
 
 def live_sync():
 
@@ -177,6 +196,8 @@ def live_sync():
     print("Novita Live Update")
     update_live_fields(novita.get_gpus())
 
+# def update_into_mongodb():
+#     pass
 
 scheduler = BlockingScheduler()
 
@@ -197,10 +218,15 @@ scheduler.add_job(
     max_instances=1,
     coalesce=True,
 )
-
 if __name__ == "__main__":
+    
+    print("Initializing database...")
+    create_database()
+    print("DB created...")
+
     print("Initial sync...")
     full_sync()
+
     print("Scheduler started...")
     scheduler.start()
 

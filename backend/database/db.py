@@ -8,7 +8,6 @@ def get_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-
 def create_database():
 
     conn = get_connection()
@@ -44,7 +43,18 @@ def create_database():
 
             updated_at TEXT
         );
-        """)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_gpu_lookup
+        ON gpu_catalog (
+            provider,
+            gpu_name,
+            vram_gb,
+            ram_gb,
+            cpu
+        );
+    """)
 
     conn.commit()
     conn.close()

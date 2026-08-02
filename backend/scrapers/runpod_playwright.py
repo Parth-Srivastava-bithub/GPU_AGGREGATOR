@@ -97,7 +97,7 @@ def runpod_scrape_runpod():
                 "availability": availability.group(1).lower() if availability else None,
             })
 
-        with open("runpod_gpu_catalog.csv", "w", newline="", encoding="utf-8") as f:
+        with open("extracted_runpod_gpu_catalog.csv", "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(
                 f,
                 fieldnames=[
@@ -113,7 +113,7 @@ def runpod_scrape_runpod():
             writer.writeheader()
             writer.writerows(rows)
 
-        print(f"Saved {len(rows)} GPUs to runpod_gpu_catalog.csv")
+        print(f"Saved {len(rows)} GPUs to extracted_runpod_gpu_catalog.csv")
         return rows
 
 def normalize_gpu_name(name: str) -> str:
@@ -193,6 +193,7 @@ def runpod_merge(playwright_data, graphql_data):
 
     return merged
 
+
 def runpod_get_gpus():
         url = "https://api.runpod.io/graphql"
 
@@ -271,28 +272,3 @@ def runpod_get_gpus():
 
         except Exception as e:
             return {"error": str(e)}
-
-def main():
-
-    playwright_data = scrape_runpod()
-
-    # graphql_data = Runpod().get_gpus()
-    graphql_data = get_gpus()     # jo bhi tera function hai
-
-    merged = merge(playwright_data, graphql_data)
-    with open(
-        "runpod_merged.csv",
-        "w",
-        newline="",
-        encoding="utf-8"
-    ) as f:
-
-        writer = csv.DictWriter(
-            f,
-            fieldnames=merged[0].keys()
-        )
-
-        writer.writeheader()
-        writer.writerows(merged)
-
-    print(f"Saved {len(merged)} GPUs to runpod_merged.csv")
