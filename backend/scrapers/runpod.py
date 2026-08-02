@@ -62,7 +62,7 @@ class RunpodVolume(RunpodProvider):
                 upsert=True
             )
             
-    def get_runpod_datacenter(self, datacenter_id):
+    def get_datacenter(self, datacenter_id):
         datacenters_collection = self.db["datacenters"]
 
         doc = datacenters_collection.find_one(
@@ -74,22 +74,12 @@ class RunpodVolume(RunpodProvider):
         else:
             return ("Datacenter not found.")
             
-    def get_gpu_availability(self, datacenter_id):
-
-        doc = self.db["datacenters"].find_one(
-            {"_id": f"runpod>{datacenter_id}"}
-        )
-
-        if not doc:
-            return []
-
-        return doc.get("gpuAvailability", [])  
 
     def get_datacenter_ids(self):
         datacenters_collection = self.db["datacenters"]
 
         docs = datacenters_collection.find(
-            {},
+            {"provider": "RunPod"},
             {"_id": 0, "datacenter_id": 1}
         )
 

@@ -3,10 +3,13 @@ from database.db import get_connection
 from fastapi import FastAPI
 from fastapi import Query
 from scrapers.runpod import CompoundRunpod
-
+from scrapers.novita import CompoundNovita
 app = FastAPI(title="Connector")
-compound_runpod = CompoundRunpod()
 
+providers = {
+    "runpod": CompoundRunpod(),
+    "novita": CompoundNovita(),
+}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -102,15 +105,28 @@ def get_gpu(
 
     return result
 
-@app.get("/runpod/datacenter/{datacenter_id}")
-def get_runpod_datacenter(datacenter_id: str):
-    return compound_runpod.volume.get_runpod_datacenter(datacenter_id)
+@app.get("/{provider}/datacenter/{datacenter_id}")
+def get_datacenter(provider: str, datacenter_id: str):
 
-@app.get("/runpod/datacenters")
-def get_runpod_datacenters():
-    ids = compound_runpod.volume.get_datacenter_ids()
+    provider = provider.lower()
+
+    if provider not in providers:
+        return {"message": "Provider not supported"}
+
+    return providers[provider].volume.get_datacenter(datacenter_id)
+
+@app.get("/{provider}/datacenters")
+def get_datacenters(provider: str):
+
+    provider = provider.lower()
+
+    if provider not in providers:
+        return {"message": "Provider not supported"}
+
+    ids = providers[provider].volume.get_datacenter_ids()
 
     return {
+        "provider": provider,
         "count": len(ids),
         "datacenters": ids
     }

@@ -170,7 +170,29 @@ class NovitaVolume(NovitaProvider):
 
         return scraper_data
     
+    def get_datacenter(self, datacenter_id):
+            datacenters_collection = self.db["datacenters"]
     
+            doc = datacenters_collection.find_one(
+                {"_id": f"novita>{datacenter_id}"}
+            )
+    
+            if doc:
+                return doc
+            else:
+                return ("Datacenter not found.")
+            
+    def get_datacenter_ids(self):
+        datacenters_collection = self.db["datacenters"]
+
+        docs = datacenters_collection.find(
+            {"provider": "Novita"},
+            {"_id": 0, "datacenter_id": 1}
+        )
+
+        return [doc["datacenter_id"] for doc in docs]
+
+
 class CompoundNovita:
 
     def __init__(self):
