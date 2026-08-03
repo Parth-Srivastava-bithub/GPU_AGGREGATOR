@@ -163,13 +163,13 @@ scheduler.add_job(
 
 # =========================================================
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    print("Initializing database...")
-    create_database()
+#     print("Initializing database...")
+#     create_database()
 
-    print("Running initial sync...")
-    initial_sync()
+#     print("Running initial sync...")
+#     initial_sync()
 
-    print("Scheduler started...")
-    scheduler.start()
+#     print("Scheduler started...")
+#     scheduler.start()

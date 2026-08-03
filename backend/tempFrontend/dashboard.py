@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 
 API = "http://127.0.0.1:8000"
-PROVIDERS = ["RunPod", "Novita"]
+PROVIDERS = ["Runpod", "Novita"]
 
 st.set_page_config(
     page_title="GPU Aggregator",
