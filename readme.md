@@ -166,3 +166,96 @@ Contains GPU information from all supported providers using a common schema.
 - Novita
 
 More providers can be added by implementing the common provider schema.
+
+---
+
+# AI Agent CLI (showdown.py)
+
+`showdown.py` is a conversational AI agent powered by Groq that talks to the connector API.
+You describe what you want in plain English and the agent figures out which API calls to make.
+
+## Additional .env keys required
+
+Add these to your `.env` file alongside the existing keys:
+
+```env
+GROQ_API_KEY=your_groq_api_key_here
+FASTAPI_BASE_URL=http://localhost:8001
+```
+
+Get a free Groq API key at https://console.groq.com
+
+## Start the connector API first
+
+The agent calls the connector in the background, so it must be running:
+
+```powershell
+uvicorn connector:app --reload --port 8001
+```
+
+## Start the agent
+
+```powershell
+python showdown.py
+```
+
+A `You:` prompt appears. Type your request and press Enter.
+
+```
+You: show me all gpus
+You: show me gpus on runpod
+You: show me my pods on novita
+You: create a pod on runpod with an RTX 4090
+You: exit
+```
+
+## How the agent handles missing information
+
+When the agent needs a value it cannot infer (e.g. which provider, which pod),
+it pauses and shows you a numbered list to pick from:
+
+```
+[Select provider] — 2 options available:
+  1. runpod
+  2. novita
+
+Pick a provider (number or exact value): 1
+```
+
+Type the number or the exact value and press Enter.
+
+## Destructive or paid operations require confirmation
+
+For create, stop, delete operations the agent shows a summary and asks before executing:
+
+```
+[Confirm] About to execute: create_pod
+  Params: {
+    "provider": "runpod",
+    "name": "my-pod",
+    ...
+  }
+Approve? (yes/no): yes
+```
+
+Type `yes` to proceed or `no` to cancel.
+
+## Supported commands (natural language examples)
+
+| What you want | Example prompt |
+|---|---|
+| List all GPUs across providers | `show me all gpus` |
+| List GPUs for one provider | `show me runpod gpus` |
+| List your pods | `show me my pods on novita` |
+| Get pod details | `get details for pod abc123 on runpod` |
+| Create a pod | `create a pod on runpod with an RTX 4090 named my-pod` |
+| Stop a pod | `stop pod abc123 on novita` |
+| Delete a pod | `delete pod abc123 on runpod` |
+| List your volumes | `show my volumes on runpod` |
+| Create a volume | `create a 20gb volume called my-vol on runpod` |
+| Delete a volume | `delete volume xyz on novita` |
+| List providers | `what providers are available` |
+
+## Exit
+
+Type `exit`, `quit`, or `q` at the `You:` prompt.

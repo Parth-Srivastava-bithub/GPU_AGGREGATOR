@@ -215,8 +215,102 @@ def get_provider_gpu_availability(provider: str):
         "count": len(gpu_availability),
         "gpu_availability": gpu_availability
     }
-    
-    
+
+
+@app.get("/gpu_catalog")
+def get_gpu_catalog(
+    provider: str | None = Query(default=None),
+    available_only: bool = Query(default=False),
+):
+    """
+    Comprehensive GPU catalog across all providers.
+    gpu_id in the response is the API-ready id (no provider prefix) —
+    pass it directly to create_pod without any modification.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    conditions = []
+    values = []
+    if provider:
+        conditions.append("LOWER(provider)=LOWER(?)")
+        values.append(provider)
+    if available_only:
+        conditions.append("deployable=1")
+
+    query = "SELECT * FROM gpu_catalog"
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    query += " ORDER BY provider ASC, hourly_price ASC"
+
+    cursor.execute(query, values)
+    columns = [col[0] for col in cursor.description]
+    rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    conn.close()
+
+    for row in rows:
+        # Strip "provider>" prefix so gpu_id is immediately usable in create_pod
+        raw_id = row.get("gpu_id", "")
+        row["gpu_id"] = raw_id.split(">", 1)[1] if ">" in raw_id else raw_id
+        row["provider"] = row["provider"].lower()
+
+    return {"count": len(rows), "gpus": rows}
+
+
+@app.get("/pod_context/{provider}")
+def get_pod_context(provider: str):
+    """
+    Single endpoint that returns everything needed to fill a create_pod form:
+    available GPUs (deployable only, API-ready gpu_ids) + user's existing volumes.
+    Pass the full response to the LLM so it can resolve gpu_id automatically.
+    """
+    provider = provider.lower()
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM gpu_catalog WHERE LOWER(provider)=LOWER(?) AND deployable=1 ORDER BY hourly_price ASC",
+        (provider,)
+    )
+    columns = [col[0] for col in cursor.description]
+    rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    conn.close()
+
+    for row in rows:
+        raw_id = row.get("gpu_id", "")
+        row["gpu_id"] = raw_id.split(">", 1)[1] if ">" in raw_id else raw_id
+        row["provider"] = row["provider"].lower()
+
+    volumes = []
+    try:
+        if provider in providers:
+            raw_vols = providers[provider].volume.get_user_volume()
+            if provider == "novita" and isinstance(raw_vols, dict):
+                volumes = [
+                    {"id": v["storageId"], "name": v["storageName"], "size": v["storageSize"]}
+                    for v in raw_vols.get("data", [])
+                ]
+            elif isinstance(raw_vols, list):
+                volumes = [{"id": v.get("id"), "name": v.get("name"), "size": v.get("size")} for v in raw_vols]
+    except Exception:
+        pass
+
+    return {
+        "provider": provider,
+        "available_gpus": rows,
+        "user_volumes": volumes,
+        "defaults": {
+            "image_name": "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04",
+            "gpu_count": 1,
+            "container_disk_gb": 20,
+            "volume_gb": 20,
+            "volume_mount_path": "/workspace",
+            "network_volume_id": None,
+            "vcpu_count": None,
+        },
+    }
+
+
 class VolumeCreationSchema(BaseModel):
     datacenter_id: str
     name: str
@@ -426,22 +520,38 @@ def create_pod(
     vcpu_count: int = None,
 ):
     provider = provider.lower()
+    # Strip DB prefix "provider>id" → API-ready "id" if caller sent the full DB format
+    if ">" in gpu_id:
+        gpu_id = gpu_id.split(">", 1)[1]
 
     if provider not in providers:
         return {"message": "Provider not supported"}
 
     try:
-        pod = providers[provider].pods.create_pod(
-            name=name,
-            gpu_id=gpu_id,
-            image_name=image_name,
-            gpu_count=gpu_count,
-            container_disk_gb=container_disk_gb,
-            volume_gb=volume_gb,
-            volume_mount_path=volume_mount_path,
-            network_volume_id=network_volume_id,
-            vcpu_count=vcpu_count,
-        )
+        if provider == "runpod":
+            pod = providers[provider].pods.create_pod(
+                name=name,
+                gpu_id=gpu_id,
+                image_name=image_name,
+                gpu_count=gpu_count,
+                container_disk_gb=container_disk_gb,
+                volume_gb=volume_gb,
+                volume_mount_path=volume_mount_path,
+                network_volume_id=network_volume_id,
+                vcpu_count=vcpu_count,
+            )
+
+        elif provider == "novita":
+            pod = providers[provider].pods.create_pod(
+                product_id=gpu_id,
+                image=image_name,
+                gpu_num=gpu_count,
+                name=name,
+                rootfs_size_gb=container_disk_gb,
+            )
+
+        else:
+            return {"message": "Provider not supported"}
 
         return {
             "provider": provider,
@@ -452,3 +562,63 @@ def create_pod(
         return {
             "message": f"Error creating pod: {str(e)}"
         }
+    
+@app.get("/{provider}/gpu_metadata")
+def get_gpu_metadata(provider: str, gpu_id: str):
+    provider = provider.lower()
+
+    if provider not in providers:
+        return {"message": "Provider not supported"}
+
+    try:
+        
+        gpu = providers[provider].provider.get_gpu_metadata(gpu_id)
+
+        return {
+            "provider": provider,
+            "gpu": gpu
+        }
+
+    except Exception as e:
+        return {
+            "message": f"Error fetching GPU metadata: {str(e)}"
+        }
+        
+@app.post("/{provider}/start_pod/{pod_id}")
+def start_pod(provider: str, pod_id: str):
+    provider = provider.lower()
+
+    if provider not in providers:
+        return {"message": "Provider not supported"}
+
+    try:
+        result = providers[provider].pods.start_pod(pod_id)
+        return result
+    except Exception as e:
+        return {"message": f"Error starting pod: {str(e)}"}
+
+@app.post("/{provider}/stop_pod/{pod_id}")
+def stop_pod(provider: str, pod_id: str):
+    provider = provider.lower()
+
+    if provider not in providers:
+        return {"message": "Provider not supported"}
+
+    try:
+        result = providers[provider].pods.stop_pod(pod_id)
+        return result
+    except Exception as e:
+        return {"message": f"Error stopping pod: {str(e)}"}
+    
+@app.delete("/{provider}/delete_pod/{pod_id}")
+def delete_pod(provider: str, pod_id: str):
+    provider = provider.lower()
+
+    if provider not in providers:
+        return {"message": "Provider not supported"}
+
+    try:
+        result = providers[provider].pods.delete_pod(pod_id)
+        return result
+    except Exception as e:
+        return {"message": f"Error deleting pod: {str(e)}"}

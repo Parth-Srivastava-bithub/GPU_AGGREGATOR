@@ -2,6 +2,7 @@ fastapi
 uvicorn
 requests
 python-dotenv
+langchain-groq
 playwright
 rapidfuzz
 apscheduler

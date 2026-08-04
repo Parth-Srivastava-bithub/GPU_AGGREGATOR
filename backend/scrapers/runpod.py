@@ -34,6 +34,33 @@ class RunpodProvider:
         self.client = MongoClient("mongodb://localhost:27017/")
         self.db = self.client["gpu_aggregator"]
 
+    def get_gpu_metadata(self, gpu_id):
+            conn = get_connection()
+            cursor = conn.cursor()
+            gpu_id = f"runpod>{gpu_id}"  # Prefix the GPU ID with "runpod>"
+            cursor.execute(
+                """
+                SELECT *
+    
+                FROM gpu_catalog
+    
+                WHERE LOWER(provider)=LOWER(?)
+                AND gpu_id=?
+                """,
+                ("runpod", gpu_id)
+            )
+    
+            columns = [col[0] for col in cursor.description]
+    
+            row = cursor.fetchone()
+    
+            conn.close()
+    
+            if row:
+                return dict(zip(columns, row))
+            else:
+                return {"message": "GPU not found."}
+    
 class RunpodVolume(RunpodProvider):
     def __init__(self):
         super().__init__()
@@ -102,32 +129,7 @@ class RunpodVolume(RunpodProvider):
             "count": len(rows),
             "gpus": rows
         }
-    def get_gpu_metadata(self, gpu_id):
-        conn = get_connection()
-        cursor = conn.cursor()
-        gpu_id = f"runpod>{gpu_id}"  # Prefix the GPU ID with "runpod>"
-        cursor.execute(
-            """
-            SELECT *
-
-            FROM gpu_catalog
-
-            WHERE LOWER(provider)=LOWER(?)
-            AND gpu_id=?
-            """,
-            ("runpod", gpu_id)
-        )
-
-        columns = [col[0] for col in cursor.description]
-
-        row = cursor.fetchone()
-
-        conn.close()
-
-        if row:
-            return dict(zip(columns, row))
-        else:
-            return {"message": "GPU not found."}
+    
              
     def get_datacenter(self, datacenter_id):
         datacenters_collection = self.db["datacenters"]
@@ -256,7 +258,7 @@ class RunpodPods(RunpodProvider):
             if pod.get("id") == pod_id:
                 return pod
         return {"message": f"Pod with ID {pod_id} not found."}
-
+    
     def resolve_gpu(self, gpu_name=None):
         """
         Resolve GPU name into compatible GPU Type IDs and Datacenter IDs.
@@ -445,12 +447,45 @@ class RunpodPods(RunpodProvider):
             "error": response.text,
         }
         
+    def start_pod(self, pod_id):
+        
+        url = f"https://rest.runpod.io/v1/pods/{pod_id}/start"
+        response = requests.post(
+            url,
+            headers=self.headers
+        )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {"message": f"Failed to start pod: {response.text}"}
+    def stop_pod(self, pod_id):
+        url = f"https://rest.runpod.io/v1/pods/{pod_id}/stop"
+        response = requests.post(
+            url,
+            headers=self.headers
+        )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {"message": f"Failed to stop pod: {response.text}"}
+
+    def delete_pod(self, pod_id):
+        url = f"https://rest.runpod.io/v1/pods/{pod_id}"
+        response = requests.delete(
+            url,
+            headers=self.headers
+        )
+        if response.status_code == 204:
+            return {"message": "Pod deleted successfully"}
+        else:
+            return {"message": f"Failed to delete pod: {response.text}"}
     
 class CompoundRunpod:
     def __init__(self):
+        self.provider = RunpodProvider()
         self.volume = RunpodVolume()
         self.pods = RunpodPods()
         
         
-# rv = CompoundRunpod()
-# print(rv.pods.get_user_pods())
+rv = CompoundRunpod()
+print(rv.pods.delete_pod("3u8g5gmakuzt5p"))
