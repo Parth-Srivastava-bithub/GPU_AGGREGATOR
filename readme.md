@@ -1,56 +1,71 @@
-# GPU Aggregate Backend
+# GPU Aggregate
+
+A multi-provider GPU orchestration platform with an autonomous AI agent CLI. Supports live GPU catalog syncing, datacenter management, and natural-language pod deployment across RunPod and Novita.
+
+---
+
+## Architecture Overview
+
+```
+User (CLI) → LangGraph Agent (showdown.py) → FastAPI Connector (:8001) → RunPod / Novita APIs
+                                                                        → SQLite (gpu_catalog)
+                                                                        → MongoDB (datacenters)
+```
+
+The agent uses a stateful LangGraph graph with human-in-the-loop interrupt points at:
+- **selection_node** — when multiple candidates exist and user must pick one
+- **create_user_clarifier** — when a required create param needs user input
+- **confirmation_gate** — before any cost-incurring or destructive operation
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full graph diagram and node breakdown.
+
+---
 
 ## Prerequisites
 
 - Python 3.11+
 - Google Chrome
-- RunPod Account
-- RunPod API Key
-- Novita API Key
+- MongoDB running on `localhost:27017`
+- RunPod account + API key
+- Novita account + API key
+- Groq API key (free at https://console.groq.com)
 
 ---
 
-# 1. Clone Project
+## Setup
+
+### 1. Clone the project
 
 ```bash
 git clone <repo-url>
 cd GPU_AGGREGATE/backend
 ```
 
----
-
-# 2. Create Virtual Environment
+### 2. Create virtual environment
 
 ```powershell
 python -m venv .venv
-
 .venv\Scripts\activate
 ```
 
----
-
-# 3. Install Dependencies
+### 3. Install dependencies
 
 ```powershell
 pip install -r requirements.txt
 ```
 
----
+### 4. Configure environment
 
-# 4. Configure Environment
-
-Create a `.env` file.
+Create a `.env` file in the project root:
 
 ```env
-RUNPOD_API_KEY=xxxxxxxxxxxxxxxx
-NOVITA_API_KEY=xxxxxxxxxxxxxxxx
+RUNPOD_API_KEY=your_runpod_api_key
+NOVITA_API_KEY=your_novita_api_key
+GROQ_API_KEY=your_groq_api_key
+FASTAPI_BASE_URL=http://localhost:8001
 ```
 
----
-
-# 5. Start Chrome in Remote Debugging Mode
-
-Run the following command in **PowerShell**.
+### 5. Start Chrome in remote debugging mode
 
 ```powershell
 & "C:\Program Files\Google\Chrome\Application\chrome.exe" `
@@ -58,197 +73,103 @@ Run the following command in **PowerShell**.
    --user-data-dir="C:\Users\user\Documents\GPU_AGGREGATE\chrome_cdp_profile"
 ```
 
-A new Chrome profile will open.
+### 6. Log in to RunPod and Novita
+
+- Open `https://console.runpod.io/deploy` — log in and stay on this page
+- Open `https://novita.ai/gpus-console/storage` — log in and stay on this page
+
+The Playwright scrapers connect to these tabs via Chrome DevTools Protocol. **Do not close Chrome while the scheduler is running.**
 
 ---
 
-# 6. Login to RunPod
+## Running the System
 
-Open
+All commands run from the `backend/` directory with the venv activated.
 
-```
-https://console.runpod.io/deploy
-```
-
-Login using GitHub (or your preferred login method).
-
-After login:
-
-- Stay on the Deploy page.
-- Do **not** close this Chrome window.
-- The scraper connects to this browser through the Chrome DevTools Protocol (CDP).
-
----
-
-# 7. Initialize Database
+### Step 1 — Initialize the database
 
 ```powershell
 python database/db.py
 ```
 
-This creates:
+Creates `database/gpu_catalog.db`.
 
-```
-database/gpu_catalog.db
-```
-
----
-
-# 8. Start Scheduler
+### Step 2 — Start the scheduler (GPU catalog sync)
 
 ```powershell
 python scheduler.py
 ```
 
-The scheduler will:
+**Initial run:** scrapes RunPod deploy page + GraphQL, fetches Novita GPUs, syncs datacenters, stores everything into SQLite and MongoDB.
 
-### Initial Run
+**Background jobs:**
 
-- Scrape RunPod Deploy page
-- Fetch RunPod GraphQL data
-- Merge both datasets
-- Store into SQLite
-- Fetch Novita GPUs
-- Store into SQLite
+| Job | Interval | What it updates |
+|-----|----------|-----------------|
+| RunPod full catalog | 1 hour | All GPU fields |
+| Novita full catalog | 1 hour | All GPU fields |
+| RunPod datacenters | 4 hours | Datacenter list |
+| Novita datacenters | 4 hours | Datacenter list |
+| RunPod live fields | 20 seconds | Price, availability, deployable |
+| Novita live fields | 20 seconds | Price, availability, deployable |
 
-### Background Jobs
-
-Every **1 hour**
-
-- Full RunPod scrape
-- RunPod GraphQL refresh
-- Merge
-- Upsert database
-- Novita full refresh
-
-Every **10 minutes**
-
-- Refresh RunPod live fields
-- Refresh Novita live fields
-
-Updated fields:
-
-- Availability
-- Deployable
-- Hourly Price
-- Community Price
-- Secure Price
-
----
-
-# Notes
-
-The browser must remain open while the scheduler is running.
-
-If the browser is closed:
-
-- Run the Chrome command again.
-- Login again.
-- Restart the scheduler.
-
----
-
-# Database
-
-SQLite database location:
-
-```
-database/gpu_catalog.db
-```
-
-Contains GPU information from all supported providers using a common schema.
-
----
-
-# Current Providers
-
-- RunPod
-- Novita
-
-More providers can be added by implementing the common provider schema.
-
----
-
-# AI Agent CLI (showdown.py)
-
-`showdown.py` is a conversational AI agent powered by Groq that talks to the connector API.
-You describe what you want in plain English and the agent figures out which API calls to make.
-
-## Additional .env keys required
-
-Add these to your `.env` file alongside the existing keys:
-
-```env
-GROQ_API_KEY=your_groq_api_key_here
-FASTAPI_BASE_URL=http://localhost:8001
-```
-
-Get a free Groq API key at https://console.groq.com
-
-## Start the connector API first
-
-The agent calls the connector in the background, so it must be running:
+### Step 3 — Start the connector API
 
 ```powershell
 uvicorn connector:app --reload --port 8001
 ```
 
-## Start the agent
+The connector exposes all GPU and pod operations as HTTP endpoints. The agent calls this internally.
+
+Key endpoints:
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /gpus/{provider}` | All GPUs for a provider |
+| `GET /gpu_catalog` | API-ready gpu_ids (used by agent for create) |
+| `GET /pod_context/{provider}` | GPUs + volumes + defaults in one call |
+| `GET /{provider}/user_pods` | Your active pods |
+| `GET /{provider}/datacenters` | Available datacenter IDs |
+| `POST /{provider}/create_pod` | Deploy a new pod |
+| `POST /{provider}/create_volume` | Create a network volume |
+| `POST /{provider}/start_pod/{pod_id}` | Start a stopped pod |
+| `POST /{provider}/stop_pod/{pod_id}` | Stop a running pod |
+| `DELETE /{provider}/delete_pod/{pod_id}` | Delete a pod |
+| `DELETE /{provider}/delete_volume/{volume_id}` | Delete a volume |
+
+### Step 4 — Start the AI agent CLI
 
 ```powershell
 python showdown.py
 ```
 
-A `You:` prompt appears. Type your request and press Enter.
+---
+
+## Using the Agent
+
+Type any natural language request at the `You:` prompt.
 
 ```
 You: show me all gpus
-You: show me gpus on runpod
+You: show me cheapest H100
+You: deploy RTX 4090 on runpod
 You: show me my pods on novita
-You: create a pod on runpod with an RTX 4090
+You: stop pod abc123 on runpod
+You: create a 20gb volume called my-vol on runpod
 You: exit
 ```
 
-## How the agent handles missing information
+### Supported operations
 
-When the agent needs a value it cannot infer (e.g. which provider, which pod),
-it pauses and shows you a numbered list to pick from:
-
-```
-[Select provider] — 2 options available:
-  1. runpod
-  2. novita
-
-Pick a provider (number or exact value): 1
-```
-
-Type the number or the exact value and press Enter.
-
-## Destructive or paid operations require confirmation
-
-For create, stop, delete operations the agent shows a summary and asks before executing:
-
-```
-[Confirm] About to execute: create_pod
-  Params: {
-    "provider": "runpod",
-    "name": "my-pod",
-    ...
-  }
-Approve? (yes/no): yes
-```
-
-Type `yes` to proceed or `no` to cancel.
-
-## Supported commands (natural language examples)
-
-| What you want | Example prompt |
-|---|---|
-| List all GPUs across providers | `show me all gpus` |
-| List GPUs for one provider | `show me runpod gpus` |
+| Intent | Example prompt |
+|--------|----------------|
+| List GPUs (all providers) | `show me all gpus` |
+| List GPUs (one provider) | `show me runpod gpus` |
+| Find cheapest GPU | `show me cheapest H100` |
+| Deploy a pod | `deploy RTX 4090 on runpod` |
 | List your pods | `show me my pods on novita` |
 | Get pod details | `get details for pod abc123 on runpod` |
-| Create a pod | `create a pod on runpod with an RTX 4090 named my-pod` |
+| Start a pod | `start pod abc123 on runpod` |
 | Stop a pod | `stop pod abc123 on novita` |
 | Delete a pod | `delete pod abc123 on runpod` |
 | List your volumes | `show my volumes on runpod` |
@@ -256,6 +177,99 @@ Type `yes` to proceed or `no` to cancel.
 | Delete a volume | `delete volume xyz on novita` |
 | List providers | `what providers are available` |
 
-## Exit
+### How GPU resolution works
 
-Type `exit`, `quit`, or `q` at the `You:` prompt.
+You never need to type an exact GPU ID. The agent resolves it automatically:
+
+```
+You: deploy RTX 4090 on runpod
+→ Agent queries /pod_context/runpod (live catalog)
+→ LLM matches "RTX 4090" → "NVIDIA GeForce RTX 4090" (real API ID)
+→ Agent shows full deployment params for confirmation
+```
+
+### Selection prompts
+
+When the agent finds multiple candidates it cannot auto-narrow, it pauses and asks:
+
+```
+[Select] Multiple GPUs found — which do you mean?
+  1. NVIDIA GeForce RTX 4090  —  $0.74/hr
+  2. NVIDIA GeForce RTX 4090 (community)  —  $0.44/hr
+
+Pick (number or exact value): 1
+```
+
+### Confirmation gate
+
+Every create, start, stop, or delete operation shows the full payload before executing:
+
+```
+[Confirm] create_pod on runpod
+  name:              my-pod
+  gpu_id:            NVIDIA GeForce RTX 4090
+  image_name:        runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+  gpu_count:         1
+  container_disk_gb: 20
+  volume_gb:         20
+
+Approve? (yes/no): yes
+```
+
+Type `yes` to execute or `no` to cancel.
+
+### Exit
+
+Type `exit`, `quit`, or `q`.
+
+---
+
+## Project Structure
+
+```
+backend/
+  showdown.py          # LangGraph AI agent CLI
+  connector.py         # FastAPI HTTP bridge to provider APIs
+  scheduler.py         # APScheduler for catalog and datacenter syncs
+  scheduler_helper.py  # SQLite upsert helpers
+  database/
+    db.py              # SQLite schema and connection
+    gpu_catalog.db     # GPU catalog (created at runtime)
+  scrapers/
+    runpod.py          # RunPod SDK (REST + GraphQL)
+    runpod_playwright.py  # RunPod Playwright scraper
+    novita.py          # Novita SDK (REST + CLI)
+    novita_playwright.py  # Novita Playwright scraper
+    common_db_hits.py  # Shared MongoDB queries
+  constants/
+    runpod_constants.py
+  tempFrontend/
+    dashboard.py       # Streamlit dashboard (prototype)
+docs/
+  ARCHITECTURE.md      # Full LangGraph graph diagram + node reference
+  AGENT_DEEP_DIVE.md   # Design decisions, known issues, scaling notes
+  BUSINESS_ROI.md      # Business value and ROI analysis
+  TEACHING_SCRIPT.md   # 15-minute video script
+```
+
+---
+
+## Current Providers
+
+| Provider | Pods | Volumes | Catalog | Datacenters |
+|----------|------|---------|---------|-------------|
+| RunPod | ✅ | ✅ | ✅ | ✅ |
+| Novita | ✅ | ✅ | ✅ | ✅ |
+
+Adding a new provider requires implementing the `CompoundProvider` interface and adding one entry to the `providers` dict in `connector.py`.
+
+---
+
+## Known Limitations
+
+- Session memory is not persisted across CLI runs (in-process `MemorySaver` only)
+- Chrome must stay open for the Playwright scrapers to work
+- No authentication on the connector API (localhost only)
+- Novita pod creation uses the `novita` CLI tool (must be installed and authenticated separately)
+
+See [`docs/AGENT_DEEP_DIVE.md`](docs/AGENT_DEEP_DIVE.md) for full details on current limitations and planned fixes.
