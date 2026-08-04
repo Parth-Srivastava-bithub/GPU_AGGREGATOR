@@ -19,6 +19,36 @@ The agent uses a stateful LangGraph graph with human-in-the-loop interrupt point
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full graph diagram and node breakdown.
 
+```mermaid
+flowchart TD
+    A([User enters a request]) --> B[Agent understands the intent]
+
+    B --> C{What does the user want?}
+
+    C -->|Deploy or create something| D[Agent builds a plan\nfor what it needs to collect]
+    C -->|Query or manage resources| E[Agent identifies\nwhich API to call]
+
+    D --> F{Any info missing\nthat needs auto-lookup?}
+    F -->|Yes| G[Agent calls the provider API\nto find the right value]
+    G -->|One clear match| H[Agent fills in the value]
+    G -->|Multiple options| I[Agent pauses and asks\nthe user to choose ⏸]
+    I --> H
+    F -->|No| H
+
+    H --> J[Agent shows the full plan\nand asks for approval ⏸]
+    J -->|Approved| K[Agent executes the operation\non the cloud provider]
+    J -->|Rejected| Z([Nothing happens])
+
+    E --> L[Agent fetches the data]
+    L --> M{Does the result\ndirectly answer the request?}
+    M -->|Yes| N[Agent replies to the user]
+    M -->|Needs reasoning| O[Agent filters, ranks,\nor summarizes the data]
+    O --> N
+
+    K --> N
+    N --> A
+```
+
 ---
 
 ## Prerequisites
