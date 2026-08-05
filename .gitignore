@@ -48,3 +48,5 @@ runpod_gpu_catalog.csv
 
 .agents/
 .claude/
+
+.drawio
