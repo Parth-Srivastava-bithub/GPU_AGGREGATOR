@@ -1,3 +1,4 @@
+from tkinter import Image
 from typing import TypedDict, List, Dict, Any, Optional, Set, Annotated
 import operator
 import json
@@ -1205,6 +1206,13 @@ app = workflow.compile(
 )
 
 
+from pathlib import Path
+
+png = app.get_graph().draw_mermaid_png()
+
+Path("graph.png").write_bytes(png)
+
+# print("Graph saved as graph.png")
 if __name__ == "__main__":
     logger.info("CLI started. Type 'exit' to quit.")
 

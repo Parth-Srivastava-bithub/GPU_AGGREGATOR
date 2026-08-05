@@ -19,6 +19,34 @@ The agent uses a stateful LangGraph graph with human-in-the-loop interrupt point
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full graph diagram and node breakdown.
 
+
+
+```bash
+                Scheduler
+                    │
+     ┌──────────────┴──────────────┐
+     │                             │
+ RunPod Sync                  Novita Sync
+     │                             │
+ GraphQL + UI                REST APIs
+ Playwright                  CLI + REST
+     │                             │
+     └──────────────┬──────────────┘
+                    │
+          Normalization Layer
+                    │
+             SQLite GPU Catalog
+                    │
+         Mongo Datacenter Cache
+                    │
+              FastAPI Connector
+                    │
+             LangGraph Agent
+                    │
+               Natural Language
+```
+
+
 ```mermaid
 flowchart TD
     A([User enters a request]) --> B[Agent understands the intent]

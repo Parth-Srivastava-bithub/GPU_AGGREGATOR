@@ -487,5 +487,3 @@ class CompoundRunpod:
         self.pods = RunpodPods()
         
         
-rv = CompoundRunpod()
-print(rv.pods.delete_pod("3u8g5gmakuzt5p"))

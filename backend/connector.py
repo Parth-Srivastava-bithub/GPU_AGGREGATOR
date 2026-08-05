@@ -622,3 +622,106 @@ def delete_pod(provider: str, pod_id: str):
         return result
     except Exception as e:
         return {"message": f"Error deleting pod: {str(e)}"}
+    
+@app.get("/{provider}/context")
+def get_provider_context(provider: str):
+    provider = provider.lower()
+
+    if provider not in providers:
+        return {"message": "Provider not supported"}
+
+    # --- GPU catalog from DB ---
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM gpu_catalog WHERE LOWER(provider)=LOWER(?) ORDER BY hourly_price ASC",
+        (provider,)
+    )
+    columns = [col[0] for col in cursor.description]
+    gpus = [dict(zip(columns, row)) for row in cursor.fetchall()]
+    conn.close()
+    for gpu in gpus:
+        raw_id = gpu.get("gpu_id", "")
+        gpu["gpu_id"] = raw_id.split(">", 1)[1] if ">" in raw_id else raw_id
+
+    # --- Datacenters ---
+    datacenters = []
+    try:
+        datacenters = providers[provider].volume.get_datacenter_ids()
+    except Exception:
+        pass
+
+    # --- GPU availability ---
+    gpu_availability = []
+    try:
+        gpu_availability = providers[provider].volume.get_gpu_availability_across_datacenters()
+    except Exception:
+        pass
+
+    # --- User volumes (normalized) ---
+    user_volumes = []
+    try:
+        raw_vols = providers[provider].volume.get_user_volume()
+        if provider == "novita" and isinstance(raw_vols, dict):
+            user_volumes = [
+                {
+                    "id": v["storageId"],
+                    "name": v["storageName"],
+                    "size": v["storageSize"],
+                    "datacenter_id": v["clusterId"],
+                }
+                for v in raw_vols.get("data", [])
+            ]
+        elif isinstance(raw_vols, list):
+            user_volumes = [
+                {
+                    "id": v.get("id"),
+                    "name": v.get("name"),
+                    "size": v.get("size"),
+                    "datacenter_id": v.get("dataCenterId"),
+                }
+                for v in raw_vols
+            ]
+    except Exception:
+        pass
+
+    # --- User pods (normalized) ---
+    user_pods = []
+    try:
+        if provider == "novita":
+            raw = providers[provider].pods.get_user_pods()
+            user_pods = [
+                {
+                    "id": pod["id"],
+                    "name": pod["name"],
+                    "status": pod["status"]["status"],
+                    "gpu_count": pod["resource_specs"]["gpu_num"],
+                    "image": pod["image"],
+                    "region": pod["region"],
+                }
+                for pod in raw.get("data", [])
+            ]
+        elif provider == "runpod":
+            raw = providers[provider].pods.get_user_pods()
+            user_pods = [
+                {
+                    "id": pod["id"],
+                    "name": pod["name"],
+                    "status": pod["desiredStatus"].lower(),
+                    "gpu_count": pod["gpuCount"],
+                    "image": pod["imageName"],
+                    "region": None,
+                }
+                for pod in raw
+            ]
+    except Exception:
+        pass
+
+    return {
+        "provider": provider,
+        "gpus": {"count": len(gpus), "items": gpus},
+        "datacenters": {"count": len(datacenters), "items": datacenters},
+        "gpu_availability": {"count": len(gpu_availability), "items": gpu_availability},
+        "user_volumes": {"count": len(user_volumes), "items": user_volumes},
+        "user_pods": {"count": len(user_pods), "items": user_pods},
+    }
