@@ -16,3 +16,9 @@ These are the endpoints and descriptions with their output parameters: {endpoint
 Your task is to give the list of keys in a flow hit back to back which eventually leads to the selected endpoint. If the selected endpoint is not reachable, respond with "None".
 Design the flow in this way that it needed least params and also which are avaiable or can be derived from the user input.
 """
+
+
+provider_selection_prompt = """
+This is the user input: {user_input}
+Return the provider eg: Runpod, Novita etc.
+"""

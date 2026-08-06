@@ -4,6 +4,7 @@ import operator
 import json
 import re
 import logging
+from urllib import response
 import uuid
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -16,7 +17,7 @@ from langchain_groq import ChatGroq
 from dotenv import load_dotenv
 import os
 from rich import print
-from prompts.showdown_v2 import endpoint_selection_prompt, router_to_endpoint_prompt
+from prompts.showdown_v2 import endpoint_selection_prompt, router_to_endpoint_prompt, provider_selection_prompt
 from prompts.registry import REGISTRY
 
 load_dotenv()
@@ -45,107 +46,57 @@ FASTAPI_BASE_URL = os.getenv("FASTAPI_BASE_URL", "http://localhost:8001")
 
 class EndpointSelectionSchema(pydantic.BaseModel):
     final_key: Annotated[str, pydantic.Field(description="The final key selected based on the user's input and the LLM's reasoning.")]
-    reasoning: Annotated[str, pydantic.Field(description="The reasoning behind the selection of the final key, explaining why it was chosen over other options, by max 5 to 10 words")]
+
+class Context(pydantic.BaseModel):
+    gpus: Annotated[List[Dict[str, Any]], pydantic.Field(description="List of available GPUs with their specifications.")]
+    top_k_gpus_matched: Annotated[List[Dict[str, Any]], pydantic.Field(description="List of top K GPUs that match the user's requirements.")]
+    datacenters: Annotated[List[Dict[str, Any]], pydantic.Field(description="List of available datacenters with their specifications.")]
+    datacenters_matched: Annotated[List[Dict[str, Any]], pydantic.Field(description="List of datacenters that match the user's requirements.")]
+    
 
 class MainState(pydantic.BaseModel):
     """
     The main state of the showdown graph.
     """
-    user_input: Annotated[Optional[str], pydantic.Field(description="The raw input provided by the user.")] = None
+    user_input: Annotated[Optional[List[str]], pydantic.Field(description="The raw input provided by the user.")] = []
     endpoint_selection: Optional[EndpointSelectionSchema] = None
     total_endpoint_params: Annotated[Optional[List[str]], pydantic.Field(description="The parameters required for the selected endpoint, if any.")] = None
     available_params: Annotated[Optional[List[str]], pydantic.Field(description="The list of parameters that are available for the selected endpoint.")] = None
     endpoint_hit_flow: Annotated[Optional[List[str]], pydantic.Field(description="The flow of keys that lead to the selected endpoint, if reachable.")] = None
     current_endpoint_doc: Annotated[Optional[Dict[str, Any]], pydantic.Field(description="The documentation of the current endpoint being processed.")] = None
+    provider: Annotated[Optional[str], pydantic.Field(description="The provider selected for the endpoint, if any.")] = None
+    full_context: Annotated[Optional[Dict[str, Any]], pydantic.Field(description="The full context retrieved from the provider's API, if any.")] = None
     
 def take_user(state: MainState) -> MainState:
     """
     Update the state with the user's input.
     """
-    state.user_input = input("Enter your input: ")
+    user_input = input("Enter your input: ")
+    state.user_input.append(user_input)
     return state
 
-def endpoint_selection(state: MainState):
-    """
-    Use the LLM to select the appropriate endpoint based on the user's input.
-    """
-    endpoints = []
-    for key, value in REGISTRY.items():
-        endpoints.append(f"{key}: {value['description']}")
-    prompt = endpoint_selection_prompt.format(endpoints=endpoints, user_query=state.user_input)
-    _structured_model = llm.with_structured_output(EndpointSelectionSchema)
-    response = _structured_model.invoke(prompt)
-    print(f"LLM Response: {response}")
-    state.endpoint_selection = response
+def choosing_provider(state: MainState) -> MainState:
+    class _ProviderSelectionSchema(pydantic.BaseModel):
+        provider: Annotated[str, pydantic.Field(description="The provider selected for the endpoint.")]
+    
+    prompt = provider_selection_prompt.format(user_input=state.user_input[-1])
+    _structured_llm = llm.with_structured_output(_ProviderSelectionSchema)
+    response = _structured_llm.invoke(prompt)
+    state.provider = response.provider
     return state
 
-def params_decision_taker(state: MainState) -> MainState:
-    """
-    Placeholder for the next step in the graph where parameters would be decided based on the selected endpoint.
-    """
-    key = state.endpoint_selection.final_key if state.endpoint_selection else None
-    if key is None:
-        print("No endpoint selected. Exiting.")
+def hit_context_api(state: MainState) -> Dict[str, Any]:
+    endpoint = f"/{state.provider.lower()}/context"
+    url = f"{FASTAPI_BASE_URL}{endpoint}"
+    response = requests.get(url)
+    try:
+        response.raise_for_status()
+        output = response.json()
+        state.full_context = output
         return state
-    
-    key_info = REGISTRY.get(key)
-    params_needed = key_info.get("requires", []) if key_info else []
-    if len(params_needed) > 0:
-        print(f"Parameters needed for {key}: {params_needed}")
-        state.total_endpoint_params = params_needed
-    else:
-        print(f"No parameters needed for {key}.")
-        state.total_endpoint_params = []
-
-    return state
-
-def router_to_endpoint(state: MainState) -> MainState:
-    """
-    Placeholder for routing to the selected endpoint.
-    """
-    params = state.total_endpoint_params if state.total_endpoint_params else []
-    params_we_have = state.available_params if state.available_params else []
-    endpoints = {}
-    for key, value in REGISTRY.items():
-        endpoints[key] = {
-            "description": value["description"],
-            "requires": value.get("requires", []),
-            "produces": value.get("produces", [])
-        }
-    prompt = router_to_endpoint_prompt.format(
-        user_input=state.user_input,
-        endpoint_selected=state.endpoint_selection.final_key if state.endpoint_selection else "None",
-        params_needed=params,
-        endpoints=endpoints
-    )
-    class FlowSchema(pydantic.BaseModel):
-        flow: Annotated[List[str], pydantic.Field(description="The flow of keys leading to the selected endpoint.")]
-        
-    _structured_model = llm.with_structured_output(FlowSchema)
-    response = _structured_model.invoke(prompt)
-    print(f"Router to Endpoint LLM Response: {response}")
-    
-    state.endpoint_hit_flow = response.flow
-    return state
-
-# def hit_api_for_resolver(state: MainState) -> MainState:
-#     dict_info = state.current_endpoint_doc if state.current_endpoint_doc else {}
-#     if dict_info:
-#         url = urllib.parse.urljoin(FASTAPI_BASE_URL, dict_info.get("path", ""))
-#         params = 
-
-    
-def runner_flow(state: MainState) -> MainState:
-    """
-    Placeholder for executing the flow to reach the selected endpoint.
-    """
-    endpoint_flow = state.endpoint_hit_flow if state.endpoint_hit_flow else []
-    if not endpoint_flow:
-        print("No flow to execute. Exiting.")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error fetching context from {url}: {e}")
         return state
-    for endpoint in endpoint_flow:
-        print(f"Executing endpoint: {endpoint}")
-        # Here you would add the logic to actually call the endpoint.
 
 
 
@@ -155,20 +106,18 @@ from langgraph.graph import START, END
 
 # Adding nodes to the graph
 graph.add_node("take_user", take_user)
-graph.add_node("endpoint_selection", endpoint_selection)
-graph.add_node("params_decision_taker", params_decision_taker)
-graph.add_node("router_to_endpoint", router_to_endpoint)
-# Adding edges
+graph.add_node("choosing_provider", choosing_provider)
+graph.add_node("hit_context_api", hit_context_api)
+
 graph.add_edge(START, "take_user")
-graph.add_edge("take_user", "endpoint_selection")
-graph.add_edge("endpoint_selection", "params_decision_taker")
-graph.add_edge("params_decision_taker", "router_to_endpoint")
-graph.add_edge("router_to_endpoint", END)
+graph.add_edge("take_user", "choosing_provider")
+graph.add_edge("choosing_provider", "hit_context_api")
+graph.add_edge("hit_context_api", END)
 
 app = graph.compile()
 
 if __name__ == "__main__":
     logger.info("Showdown v2 CLI started. Type 'exit' to quit.")
-    state = MainState(endpoint_selection=None)
+    state = MainState()
     output = app.invoke(state)
     print(output)
