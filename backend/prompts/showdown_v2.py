@@ -22,3 +22,31 @@ provider_selection_prompt = """
 This is the user input: {user_input}
 Return the provider eg: Runpod, Novita etc.
 """
+
+
+asking_question_prompt = """
+This is the user input: {user_input}
+This is how gpu struct looks like: 
+ {
+        "id": 21,
+        "provider": "RunPod",
+        "gpu_id": "NVIDIA RTX A5000",
+        "gpu_name": "RTX A5000",
+        "manufacturer": "Nvidia",
+        "vram_gb": 24,
+        "ram_gb": 25,
+        "cpu": 9,
+        "gpu_count": 1,
+        "hourly_price": 0.16,
+        "community_price": 0.16,
+        "secure_price": 0.27,
+        "spot_price": null,
+        "availability": "unavailable",
+        "deployable": 0,
+        "reliability": null,
+        "updated_at": "2026-08-04 06:14:09"
+      },
+
+Your task is to give the list of max 5 questions which can be asked to the user to get the most relevant gpu struct. The questions should be in a way that they are not repetitive and also they should be such that they can be answered by the user. If you think that no more questions are needed, respond with "None".
+Also explain the reasoning behind each question in a separate line after the question. The reasoning should be in a way that it is understandable by the user and also it should be in a way that it helps the user to understand why the question is being asked.
+"""

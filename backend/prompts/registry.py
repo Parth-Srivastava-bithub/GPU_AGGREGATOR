@@ -248,7 +248,7 @@ REGISTRY = {
         "description": "List all datacenter IDs for a provider. Use to resolve datacenter_id for create_volume.",
         "category": "resolver",
         "method": "GET",
-        "path_template": "/{provider}/datacenters",
+        "path_template": "/{provider}/datacenter s",
         "path_params": ["provider"],
         "query_params": [],
         "requires": ["provider"],
@@ -261,5 +261,55 @@ REGISTRY = {
     },
 }
 
+GLOBAL_PARAMS = {
+    "provider": {
+        "value": None,
+        "resolver_endpoints": [
+            "get_providers"
+        ]
+    },
 
+    "gpu_id": {
+        "value": None,
+        "resolver_endpoints": [
+            "get_pod_context",
+            "get_gpu_catalog",
+            "get_provider_gpu_availability",
+            "get_provider_gpus"
+        ]
+    },
 
+    "pod_id": {
+        "value": None,
+        "resolver_endpoints": [
+            "get_user_pods"
+        ]
+    },
+
+    "volume_id": {
+        "value": None,
+        "resolver_endpoints": [
+            "get_user_volumes"
+        ]
+    },
+
+    "datacenter_id": {
+        "value": None,
+        "resolver_endpoints": [
+            "get_datacenters"
+        ]
+    },
+
+    "gpu_name": {
+        "value": None,
+        "resolver_endpoints": [
+            "get_provider_gpus",
+            "get_all_gpus"
+        ]
+    },
+
+    "result": {
+        "value": None,
+        "resolver_endpoints": []
+    }
+}

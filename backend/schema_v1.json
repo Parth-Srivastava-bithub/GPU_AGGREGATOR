@@ -1,0 +1,35 @@
+{
+    global_endpoint: {
+        endpoint: ENDPOINT,
+        params: {
+            param_1: None
+            param_2: param_2_value
+            ...
+        },
+        status: PENDING
+    },
+    sub_endpoint: [
+        {
+            endpoint: ENDPOINT,
+            params: {
+                param_1: None
+                param_2: param_2_value
+                ...
+            },
+            status: PENDING
+        },
+        {
+            endpoint: ENDPOINT_2,
+            params: {
+                param_1: None
+                param_2: param_2_value
+                ...
+            },
+            status: DONE
+        }
+        ...
+    ],
+}
+
+
+SUBENDPOINTS SHOULD BE ADD AT TOP OF LIST CUZ LATEST SUBENDPOINTS SHOULD BE AT TOP OF LIST, REASON IS SIMPLE THAT LATEST ONE ARE COMING FROM RECURSION AND THATS WHY THEY SHOULD BE AT TOP OF LIST, SO THAT WHEN WE ARE CHECKING FOR PENDING SUBENDPOINTS, WE CAN CHECK FROM TOP OF LIST AND GET THE LATEST ONE FIRST.
